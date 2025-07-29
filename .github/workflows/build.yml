@@ -26,12 +26,14 @@ jobs:
           git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config \
           zlib1g-dev libncurses5-dev libtinfo5 cmake libffi-dev libssl-dev
 
-    - name: Install Buildozer
-      run: pip install buildozer
+    - name: Install Python dependencies
+      run: |
+        pip install --upgrade pip
+        pip install cython
+        pip install buildozer
 
     - name: Build APK
-      run: |
-        buildozer android debug
+      run: buildozer android debug
 
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
