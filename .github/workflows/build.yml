@@ -1,4 +1,4 @@
-name: Build Habit Builder APK
+name: Build APK with Buildozer
 
 on:
   push:
@@ -9,41 +9,82 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up Python
+    - name: Set up Python 3.9
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
 
     - name: Install system dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
           git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config \
           zlib1g-dev libncurses5-dev libtinfo5 cmake libffi-dev libssl-dev \
-          android-sdk android-sdk-platform-tools
+          ninja-build
 
     - name: Install Python dependencies
       run: |
-        pip install --upgrade pip
-        pip install cython
-        pip install buildozer
+        python -m pip install --upgrade pip wheel
+        pip install cython==0.29.36 buildozer==1.5.0
 
-    - name: Set environment variables
+    - name: Setup Android SDK
       run: |
-        echo "export PATH=$PATH:/usr/lib/android-sdk/build-tools" >> $GITHUB_ENV
-        echo "export ANDROIDSDK=/usr/lib/android-sdk" >> $GITHUB_ENV
+        # Create proper directory structure
+        mkdir -p ~/android-sdk/cmdline-tools/latest
+        cd ~/android-sdk
+        
+        # Download command line tools
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip -d cmdline-tools/latest
+        rm commandlinetools-linux-9477386_latest.zip
+        
+        # Set environment variables
+        echo "ANDROID_HOME=~/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=~/android-sdk" >> $GITHUB_ENV
+        echo "PATH=${PATH}:~/android-sdk/cmdline-tools/latest/bin:~/android-sdk/platform-tools" >> $GITHUB_ENV
+        
+        # Accept licenses first
+        yes | sdkmanager --licenses >/dev/null
+        
+        # Install platform tools and build tools
+        sdkmanager "platform-tools" "build-tools;30.0.3" "platforms;android-30" "ndk;21.4.7075529"
+        
+        # Verify installation
+        ls -la ~/android-sdk/build-tools/30.0.3/
+        ls -la ~/android-sdk/platform-tools/
+        which adb aidl
+
+    - name: Configure Buildozer
+      run: |
+        # Initialize if no spec file exists
+        if [ ! -f buildozer.spec ]; then
+          buildozer init
+        fi
+        
+        # Update buildozer.spec with required settings
+        sed -i "s|^android.ndk = .*|android.ndk = 21.4.7075529|" buildozer.spec
+        sed -i "s|^android.sdk = .*|android.sdk = 30|" buildozer.spec
+        sed -i "s|^android.ndk_path = .*|#android.ndk_path = ${ANDROID_HOME}/ndk/21.4.7075529|" buildozer.spec
+        sed -i "s|^android.sdk_path = .*|#android.sdk_path = ${ANDROID_HOME}|" buildozer.spec
 
     - name: Build APK
-      run: buildozer android debug
+      run: |
+        buildozer -v android clean
+        buildozer -v android debug
+        
+        # Verify APK was built
+        ls -la ./bin/
 
     - name: Upload APK artifact
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: habit-builder-apk
+        name: app-apk
         path: ./bin/*.apk
-        retention-days: 30
+        retention-days: 7
